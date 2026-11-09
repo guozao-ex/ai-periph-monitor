@@ -44,19 +44,23 @@
 | `NOISE_LEVEL_SET` | `0x06` | 降噪档位 0–3 | ✅ 写 |
 | `DEVICE_ID_GET` | `0x08` | 设备 ID | — |
 | `NOISE_LEVEL_GET` | `0x11` | 降噪档位 | — |
-| `SPEAKER_SET` / `GET` | `0x12` / `0x13` | 监听开关 | — |
+| `SPEAKER_SET` / `GET` | `0x12` / `0x13` | 监听开关（0 开 / 1 关） | ✅ 写 + 读，**每次改都会重启接收器** |
 | `DEVICE_SN_GET` | `0x15` | 序列号 | — |
 | `VOICE_MODE_SET` | `0x18` | 声道模式 0 / 1 / 2 | ✅ 写 |
 | `NOISE_SWITCH_SET` | `0x19` | 降噪开关（切换） | ✅ 写 |
-| `VOICE_LOCK_SET` / `GET` | `0x34` / `0x35` | 按键锁定 | — |
-| `SHUTDOWN_TIME_SET` | `0x36` | 自动关机时间 | — |
+| `VOICE_LOCK_SET` / `GET` | `0x34` / `0x35` | 按键锁定（0 解锁 / 1 锁定） | ✅ 写 + 读 |
+| `SHUTDOWN_TIME_SET` | `0x36` | Mic 自动关机（0 开 / 1 关） | ✅ 写，心跳第 10 字节回读 |
 | `LIGHT_SET` | `0x39` | 指示灯（0 开 / 1 关） | ✅ 写 |
 | `BEAUTY_VOICE_SET` | `0x3A` | 美声/EQ `[enable, preset]` | 仅读心跳 |
-| `TX_IDENTIFY_SET` / `GET` | `0x3B` / `0x3C` | 查找发射器 | — |
-| `SMART_BATTERY_SET` / `GET` | `0x3D` / `0x3E` | 智能续航 | — |
-| `DELETE_PAIR_SET` | `0x3F` | 解除配对 | — |
-| `FACTORY_RESET_SET` | `0x40` | 恢复出厂 | — |
+| `TX_IDENTIFY_SET` / `GET` | `0x3B` / `0x3C` | 查找发射器（1 开始 / 0 停止） | ✅ 写 + 读 |
+| `SMART_BATTERY_SET` / `GET` | `0x3D` / `0x3E` | 智能续航（1 开 / 0 关） | ✅ 写 + 读 |
+| `DELETE_PAIR_SET` | `0x3F` | 解除配对 `[1]=TX1 [2]=TX2` | 文档记录，**未实机**（破坏性） |
+| `FACTORY_RESET_SET` | `0x40` | 恢复出厂（空 payload） | 文档记录，**未实机**（破坏性） |
 | `RULE_VERSION_GET` | `0x41` | 规则/固件版本 | — |
+| `VIBE_TEMPLATE_SET` / `GET` | `0x42` / `0x43` | 交互模式 + 每个 TX 用哪套模板 + 灯光亮度（4 字节） | ✅ 写 + 读 |
+| `VIBE_INFO_SET` / `GET` | `0x44` / `0x45` | 模板内容：序号 + 名称 30 字节 + 单击/双击快捷键 | ✅ 写 + 读 |
+| `VIBE_KEY_NAME_SET` / `GET` | `0x46` / `0x47` | 按键显示名（32 字节） | ✅ 写 + 读 |
+| `VIBE_LANGUAGE_SET` | `0x4E` | 语言 0 中文 / 1 英文 | ❌ 本机固件不回包（见下） |
 | `RESTART_RX` | `0x0C` | 重启接收器（会掉线） | — |
 | `OTA_*` | `0x09` / `0x0B` / `0x0D` / `0x0E` | 升级链路（TX 升级、结果、RX 升级、包确认），**不要碰** | — |
 
@@ -77,7 +81,7 @@
 | 6 | 降噪档位 0–3（0 = 关闭；APP 里 `noiseOpen = noiseLevel != 0`） | ✅ 实测 |
 | 7 | 接收器音量 0–5 | ✅ 实测 |
 | 9 | 声道模式 0 = 单声道 / 1 = 立体声 / 2 = 安全音轨 | ✅ 实测 |
-| 10 | 自动关机（APP 按 `== 0` 判「开启」，语义反常，本适配不采用这个判断） | 未验证 |
+| 10 | 自动关机（`== 0` 视为开启；写 `0x36[1]` 后这一字节变 1，写 `0x36[0]` 回 0） | ✅ 实测 |
 | 13 | 指示灯（`== 0` 视为开；写 `0x39[1]` 关灯） | ✅ 实测 |
 | 14 | bit0 = 美声开关，bit1–7 = 美声预设号（关闭时仍保留上次的预设号，别当「当前选择」显示） | ✅ 实测 |
 | 15 | bit0/1 TX1/TX2 静音，bit2/3 TX1/TX2 充电（✅ 实测）；bit4 相机接收器充电（**推断**，本机这一位恒 0） | 部分实测 |
@@ -114,16 +118,17 @@
 `app/lark_a2_control.py`：
 
 - `build(cmd, payload, device)` — 6118 帧构建（64 字节含 report id）
-- `parse_heart(payload)` — 在线/电量/降噪档/静音/充电，以及音量、声道、灯、美声
+- `parse_heart(payload)` — 在线/电量/降噪档/静音/充电，以及音量、声道、灯、自动关机、美声
+- `parse_reply(raw, cmd)` — 取某条命令的回包 payload（带不带 report id 都认）
 - `parse_set_ack(raw, cmd)` — 写命令回执（成功 = `01`）；只接受写命令，长度必须正好 1 字节，其它命令抛错
-- `noise_level_request(level)` — 0–3，越界抛错
-- `noise_switch_request()` — 切换开关
-- `voice_mode_request(mode)` — 声道模式 0/1/2
-- `voice_level_request(level)` — 接收器音量 0–5
-- `light_request(on)` — 指示灯，线序取反（0 = 开）
-- `channel_mode_name(mode)` — 声道中文名，未登记的值返回 `None`
+- 降噪：`noise_level_request(level)`、`noise_switch_request()`
+- 声道 / 音量 / 灯：`voice_mode_request(mode)`、`voice_level_request(level)`、`light_request(on)`、`channel_mode_name(mode)`
+- 更多设置：`speaker_request(on)` / `speaker_get_request()`、`voice_lock_request(locked)` / `voice_lock_get_request()`、`auto_power_off_request(on)`、`tx_identify_request(on)` / `tx_identify_get_request()`、`smart_battery_request(on)` / `smart_battery_get_request()`
+- 模板：`template_get_request()`、`template_set_request(work_mode, tx1, tx2, led)`、`template_info_get_request(num)`、`template_info_set_request(num, name, work1, work2[, attr])`、`key_name_get_request(num, key)`、`key_name_set_request(num, key, name)`
+- 模板解析：`parse_template_config(payload)`、`parse_template_info(payload)`、`template_availability(payload)`、`parse_key_name(payload)`、`parse_flag_reply(payload, open_value)`、`parse_int_reply(payload)`
+- 名称与快捷键：`encode_name30` / `decode_name30`、`encode_hotkey6` / `decode_hotkey6` / `format_hotkey6`、`KEY_CODES` / `MODIFIER_BITS`
 
-未实现：模板（0x42/0x43）、模板信息（0x44/0x45）、按键名（0x46/0x47）、语言（0x4E）。这些协议已知但需模板 CRUD 与校验，未做。
+故意不开放：语言 `0x4E`（本机固件不回包）、解除配对 `0x3F`、恢复出厂 `0x40`（破坏性，用户明确不试）。
 
 ### 未登记命令的扫描结果（2026-11-09 22:5x）
 
@@ -148,6 +153,74 @@
 旧结论写的是「单双声道属于蓝牙/私有协议，电脑端 WebHID 没有这条通路」——**这条是错的，已删除**。
 
 网页 JS 里 `channel` / `stereo` / `mono` / `声道` / `立体声` 确实零命中，但那只说明**网页没实现**，不等于设备不支持。手机 APP 插的是同一个 2.4G 接收器，走的还是这条 `0xFF90` HID 通道；反编译 APP 后直接发同名命令，实机全部成功（下一节）。
+
+## 模板系统（0x42–0x47，2026-11-10 实机闭环）
+
+APP 里的模板最多 **5 套**（序号 0–4），每套 = 名称（30 字节 UTF-8）+ 单击快捷键 + 双击快捷键 + 两个按键的显示名；接收器另有一份全局配置：交互模式、每个 TX 应用哪套模板、灯光亮度。
+
+### 0x42 / 0x43 全局配置（4 字节）
+
+| 字节 | 含义 |
+| --- | --- |
+| 0 | 交互模式：0 = 麦克风模式，1 = 模板（vibe）模式 |
+| 1 | MIC1 使用哪套模板（0–4） |
+| 2 | MIC2 使用哪套模板（0–4） |
+| 3 | 灯光亮度：0 = 正常，1 = 低 |
+
+实机闭环：读 `00000000` → 写 `00000001` 读回一致 → 写 `01000000` 读回一致 → 写回 `00000000`。
+
+### 0x44 / 0x45 模板内容
+
+- **写**：`[num][名称 30][单击快捷键 6][双击快捷键 6]` = **43 字节**；固件 ≥ `3.0.2.046` 时再加 1 字节触发模式（bit0 = 单击/长按），共 44 字节。本机固件 `3.0.2.026`，**只支持 43 字节**。
+- **读**：发 `[num]`，回 43/44 字节记录。网页 JS 还定义了另外两种形态：**回空 payload = 该模板不存在**、**回 1 字节 = 可用模板位图**（bit0–4 对应 5 套）——**这两种本机从未观测到**（本机空槽回的是 43 字节全零记录），代码按网页语义解析，但结论只能算「网页推断」。
+- 名称 30 字节 UTF-8，按字符边界截断、NUL 补齐；**空名称 + 两个快捷键全 0 = 删除该套模板**（APP 就是这么删的）。
+
+### 0x46 / 0x47 按键显示名
+
+- **写**：`[num][keyIndex][名称 30]` = **32 字节**；keyIndex `0` = 单击、`1` = 双击。
+- **读**：发 `[num][keyIndex]`，回 32 字节。
+
+### 快捷键 6 字节编码
+
+`[修饰键掩码][最多 5 个 HID 键码]`。掩码位：LCtrl `0x01`、LShift `0x02`、LAlt `0x04`、LWin `0x08`、RCtrl `0x10`、RShift `0x20`、RAlt `0x40`、RWin `0x80`；键码与 USB HID 键盘一致（A=`0x04` … Enter=`0x28`、F1=`0x3A`、POWER=`0x66`）。`app/lark_a2_control.py` 里的 `KEY_CODES` 是网页 JS 的完整表（79 项）。
+
+### 实机闭环（2026-11-10 00:0x）
+
+```
+读 slot0    → 名称 "WorkBuddy 快捷键"，单击 LCtrl+D，双击 Enter，按键名 语音输入 / 发送
+写 slot4    → 名称 T4测试、Ctrl+A / F1 → 0x45 读回逐字节一致 → 0x47 读回 "双击测试"
+清空 slot4  → 0x45 读回全 0（is_empty=True）、0x47 读回空
+读 5 个槽  → slot0 在用，slot1–4 全空
+```
+
+⚠️ **VIBE 系列写命令的回执是 `00` 而不是 `01`**（`55 bb dd 44 80 00 01 00`），所以模板写入只能靠**读回**确认，不能套用降噪/声道那套 `parse_set_ack`。
+
+⚠️ 模板的**颜色（白/黄/青/紫/粉）不是协议字段**：网页里 `templateColorByNum()` 按模板序号取色，纯 UI 装饰，设备并不存颜色。
+
+## 更多设置（0x12 / 0x34 / 0x36 / 0x3B / 0x3D，2026-11-10 实机闭环）
+
+| 命令 | 语义 | 实机结论 |
+| --- | --- | --- |
+| `0x12` 监听开关 | 0 = 开，1 = 关（取反） | 写 1 → 接收器**重启并重新枚举** → `0x13` 读回 1；写 0 → 再次重启 → 读回 0 |
+| `0x34` 按键锁定 | 0 解锁 / 1 锁定 | 写 1 → `0x35` 读回 1；写 0 → 读回 0 |
+| `0x36` 自动关机 | 0 开 / 1 关（取反） | 写 1 → 心跳第 10 字节 = 1；写 0 → 回 0 |
+| `0x3B` 查找发射器 | 1 开始 / 0 停止 | 写 1 → `0x3C` 读回 1；写 0 → 读回 0 |
+| `0x3D` 智能续航 | 1 开 / 0 关 | 写 0 → `0x3E` 读回 0；写 1 → 读回 1 |
+
+⚠️ `0x12` 写完接收器会掉线重枚举（约 2–4 秒）。调用方必须**关掉句柄、等设备重新出现再打开**，不能在旧句柄上继续发。
+
+## 语言（0x4E）：本机固件不支持
+
+网页下发语言前先读固件版本（`0x41`），**要求 ≥ `3.0.2.030`**；本机回 `03 00 02 00 02 06` → 版本 `3.0.2.026`，低于门槛。
+
+实测：`0x4E [0]`、`0x4E [1]` 各发两次，**均无任何回包**（每次等 2 秒）。按「没回包就不做」的规矩，本项目**不提供**语言写入，只把命令记在表里。
+
+## 未实机验证的写命令（一律不开放）
+
+| 命令 | 为什么不做 |
+| --- | --- |
+| `0x3F` 解除配对 `[1]`/`[2]` | 会解绑发射器，需要硬件按键重新配对。用户 2026-11-10 明确说不试。 |
+| `0x40` 恢复出厂（空 payload） | 会清空模板与全部设置。用户 2026-11-10 明确说不试。 |
 
 ## 手机 APP 取证（2026-11-09 23:1x）
 
@@ -184,3 +257,4 @@ APK：`猛玛音频 v3.2.2`（`com.hollyland.larkc1`，8 个 DEX）。用 jadx 1
 - 解析：TX1 在线、电量 `0x62` = 98%、TX2 离线、未充电。
 - `receiver_battery.read()` 返回 `ok=True level=98 status=discharging`。
 - 2026-11-09 23:1x 复测：`0x03` 版本回包 `0300021a`、`0x41` 规则版本回包 `030002000206`、`0x15` 序列号 11 字节 ASCII（涉及本机唯一标识，本文不抄原值）；声道、音量、灯三条写命令闭环见上节。
+- 2026-11-10 00:0x：模板 0 读回 `WorkBuddy 快捷键 / LCtrl+D / Enter / 语音输入·发送`；写 slot4 后逐字节读回一致、清空后全 0；`0x42` 三种配置写读一致；`0x12 / 0x34 / 0x36 / 0x3B / 0x3D` 写完全部回读一致，其中 `0x12` 触发两次掉线重枚举。

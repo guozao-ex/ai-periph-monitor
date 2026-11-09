@@ -31,6 +31,12 @@ class LarkControlTests(unittest.TestCase):
     ACK_MODE = bytes.fromhex('55bbdd1880000101')
     ACK_LEVEL = bytes.fromhex('55bbdd0580000101')
     ACK_LIGHT = bytes.fromhex('55bbdd3980000101')
+    # Same shape, captured 2026-11-10 for the five extra settings.
+    ACK_12 = bytes.fromhex('55bbdd1280000101')
+    ACK_34 = bytes.fromhex('55bbdd3480000101')
+    ACK_36 = bytes.fromhex('55bbdd3680000101')
+    ACK_3B = bytes.fromhex('55bbdd3b80000101')
+    ACK_3D = bytes.fromhex('55bbdd3d80000101')
 
     def test_parse_heart_live(self):
         h = ctl.parse_heart(self.HEART)
@@ -84,6 +90,13 @@ class LarkControlTests(unittest.TestCase):
         self.assertEqual(ctl.parse_heart(self.HEART_VOLUME_1).voice_level, 1)
         self.assertTrue(ctl.parse_heart(self.HEART_MONO).light_on)
         self.assertFalse(ctl.parse_heart(self.HEART_LIGHT_OFF).light_on)
+
+    def test_heart_reports_auto_power_off(self):
+        # 0x36[0] leaves byte 10 at 0 (auto power off on), 0x36[1] sets it to 1.
+        self.assertTrue(ctl.parse_heart(self.HEART_MONO).auto_power_off_on)
+        payload = bytearray(self.HEART_MONO)
+        payload[10] = 1
+        self.assertFalse(ctl.parse_heart(bytes(payload)).auto_power_off_on)
 
     def test_heart_reports_beauty_audio(self):
         # Live p14 = 0x04 while beauty audio is off: bit0 clear, preset 2 kept.
@@ -168,3 +181,211 @@ class LarkControlTests(unittest.TestCase):
         odd = bytearray(_pad(self.ACK_MODE))
         odd[7] = 2
         self.assertIsNone(ctl.parse_set_ack(bytes(odd), ctl.VOICE_MODE_SET))
+
+    def test_setting_frames(self):
+        # 0x12 and 0x36 are inverted on the wire; 0x34/0x3B/0x3D are not.
+        self.assertEqual(ctl.speaker_request(True)[7], 0)
+        self.assertEqual(ctl.speaker_request(False)[7], 1)
+        self.assertEqual(ctl.speaker_get_request()[1:7],
+                         bytes([0xAA, 0xDD, 0x13, 0x40, 0x00, 0x00]))
+        self.assertEqual(ctl.voice_lock_request(True)[7], 1)
+        self.assertEqual(ctl.voice_lock_request(False)[7], 0)
+        self.assertEqual(ctl.auto_power_off_request(True)[7], 0)
+        self.assertEqual(ctl.auto_power_off_request(False)[7], 1)
+        self.assertEqual(ctl.tx_identify_request(True)[7], 1)
+        self.assertEqual(ctl.tx_identify_get_request()[1:7],
+                         bytes([0xAA, 0xDD, 0x3C, 0x40, 0x00, 0x00]))
+        self.assertEqual(ctl.smart_battery_request(True)[7], 1)
+        self.assertEqual(ctl.smart_battery_request(False)[7], 0)
+        for bad in (0, 1, None, 'on'):
+            with self.assertRaises(ValueError):
+                ctl.speaker_request(bad)
+            with self.assertRaises(ValueError):
+                ctl.voice_lock_request(bad)
+            with self.assertRaises(ValueError):
+                ctl.auto_power_off_request(bad)
+            with self.assertRaises(ValueError):
+                ctl.tx_identify_request(bad)
+            with self.assertRaises(ValueError):
+                ctl.smart_battery_request(bad)
+
+    def test_setting_acks_are_accepted(self):
+        # Every frame below was captured from the receiver, not synthesised.
+        for cmd, frame in ((ctl.SPEAKER_SET, self.ACK_12),
+                           (ctl.VOICE_LOCK_SET, self.ACK_34),
+                           (ctl.SHUTDOWN_TIME_SET, self.ACK_36),
+                           (ctl.TX_IDENTIFY_SET, self.ACK_3B),
+                           (ctl.SMART_BATTERY_SET, self.ACK_3D)):
+            self.assertIs(ctl.parse_set_ack(frame, cmd), True)
+            self.assertEqual(ctl.parse_reply(frame, cmd), b'\x01')
+        # VIBE commands answer 00 instead of 01, so they must not be treated as
+        # acknowledgements; parse_set_ack refuses them outright.
+        for cmd in (ctl.VIBE_TEMPLATE_SET, ctl.VIBE_INFO_SET, ctl.VIBE_KEY_NAME_SET):
+            with self.assertRaises(ValueError):
+                ctl.parse_set_ack(_pad(bytes([0x55, 0xBB, 0xDD, cmd, 0x80, 0x00, 0x01, 0x00])), cmd)
+
+    def test_flag_and_int_replies(self):
+        self.assertIs(ctl.parse_flag_reply(b'\x01'), True)
+        self.assertIs(ctl.parse_flag_reply(b'\x00'), False)
+        self.assertIs(ctl.parse_flag_reply(b''), None)
+        # The monitor state is inverted: 0 means on.
+        self.assertIs(ctl.parse_flag_reply(b'\x00', open_value=0), True)
+        self.assertIs(ctl.parse_flag_reply(b'\x01', open_value=0), False)
+        self.assertIs(ctl.parse_int_reply(b'\x07'), 7)
+        self.assertIsNone(ctl.parse_int_reply(b''))
+
+
+class LarkTemplateTests(unittest.TestCase):
+    # Live 0x43 reply: mic mode, both transmitters on template 0, light normal.
+    TEMPLATE_CFG = bytes.fromhex('00000000')
+    # Live 0x45 reply for slot 0: "WorkBuddy 快捷键", LCtrl+D / Enter, no attr.
+    TEMPLATE_0 = bytes.fromhex(
+        '00' '576f726b427564647920e5bfabe68db7e994ae' '0000000000000000000000'
+        '010700000000' '002800000000')
+    # Live 0x47 replies: key names of template 0.
+    KEY_0_0 = bytes.fromhex('0000' 'e8afade99fb3e8be93e585a5' + '00' * 18)
+    KEY_0_1 = bytes.fromhex('0001' 'e58f91e98081' + '00' * 24)
+
+    def test_name_field_is_thirty_bytes(self):
+        field = ctl.encode_name30('WorkBuddy 快捷键')
+        self.assertEqual(len(field), 30)
+        self.assertEqual(field, self.TEMPLATE_0[1:31])
+        self.assertEqual(ctl.decode_name30(field), 'WorkBuddy 快捷键')
+        self.assertEqual(ctl.decode_name30(self.KEY_0_0[2:32]), '语音输入')
+        self.assertEqual(ctl.decode_name30(self.KEY_0_1[2:32]), '发送')
+
+    def test_name_truncation_never_splits_a_character(self):
+        field = ctl.encode_name30('测' * 20)
+        self.assertEqual(len(field), 30)
+        self.assertEqual(ctl.decode_name30(field), '测' * 10)
+        # 31 bytes would end mid character, so the last one has to be dropped.
+        mixed = ctl.encode_name30('a' + '测' * 10)
+        self.assertEqual(mixed, b'a' + '测'.encode() * 9 + b'\x00\x00')
+        self.assertEqual(len(mixed), 30)
+        self.assertEqual(ctl.encode_name30(None), bytes(30))
+        self.assertEqual(ctl.decode_name30(bytes(30)), '')
+
+    def test_hotkey_round_trip(self):
+        self.assertEqual(ctl.encode_hotkey6(['LCtrl', 'D']), b'\x01\x07\x00\x00\x00\x00')
+        self.assertEqual(ctl.format_hotkey6(self.TEMPLATE_0[31:37]), 'LCtrl+D')
+        self.assertEqual(ctl.format_hotkey6(self.TEMPLATE_0[37:43]), 'ENTER')
+        self.assertEqual(ctl.format_hotkey6(bytes(6)), '')
+        keys = ['LShift', 'RAlt', 'A', 'F1']
+        self.assertEqual(ctl.decode_hotkey6(ctl.encode_hotkey6(keys)), keys)
+
+    def test_hotkey_rejects_bad_input(self):
+        for bad in ('LCtrl+D', b'\x01\x07', None, 5):
+            with self.assertRaises(ValueError):
+                ctl.encode_hotkey6(bad)
+        with self.assertRaises(ValueError):
+            ctl.encode_hotkey6(['NOPE'])
+        with self.assertRaises(ValueError):
+            ctl.encode_hotkey6(['A', 'B', 'C', 'D', 'E', 'F'])
+        with self.assertRaises(ValueError):
+            ctl._hotkey_field(b'\x01' * 7)
+        # b'' means "nothing bound" and pads to six zero bytes.
+        self.assertEqual(ctl._hotkey_field(b''), bytes(6))
+        # A string must not be iterated character by character.
+        for text in ('AB', 'LCtrl+D'):
+            with self.assertRaises(ValueError):
+                ctl._hotkey_field(text)
+
+    def test_modifier_aliases(self):
+        # The page accepts CTRL/SHIFT/ALT/WIN and folds them onto the left keys.
+        self.assertEqual(ctl.encode_hotkey6(['ctrl', 'A']), ctl.encode_hotkey6(['LCtrl', 'A']))
+        self.assertEqual(ctl.encode_hotkey6(['shift', 'A']), ctl.encode_hotkey6(['LShift', 'A']))
+        self.assertEqual(ctl.encode_hotkey6(['GUI', 'A']), ctl.encode_hotkey6(['LWin', 'A']))
+        self.assertEqual(ctl.decode_hotkey6(ctl.encode_hotkey6(['META', 'F5'])),
+                         ['LWin', 'F5'])
+
+    def test_template_config_frame(self):
+        packet = ctl.template_set_request(ctl.WORK_MODE_VIBE, 1, 2, ctl.LED_MODE_LOW)
+        self.assertEqual(len(packet), 64)
+        self.assertEqual(packet[1:7], bytes([0xAA, 0xDD, 0x42, 0x40, 0x00, 0x04]))
+        self.assertEqual(packet[7:11], bytes([1, 1, 2, 1]))
+        self.assertEqual(ctl.template_get_request()[1:7],
+                         bytes([0xAA, 0xDD, 0x43, 0x40, 0x00, 0x00]))
+        for args in ((-1, 0, 0, 0), (2, 0, 0, 0), (0, 5, 0, 0), (0, 0, -1, 0),
+                     (0, 0, 0, 2), (True, 0, 0, 0)):
+            with self.assertRaises(ValueError):
+                ctl.template_set_request(*args)
+
+    def test_template_info_frame_shape(self):
+        packet = ctl.template_info_set_request(3, 'AB', ['LCtrl', 'A'], ['F1'])
+        self.assertEqual(packet[1:7], bytes([0xAA, 0xDD, 0x44, 0x40, 0x00, 43]))
+        self.assertEqual(packet[7], 3)
+        self.assertEqual(packet[8:38], b'AB' + bytes(28))
+        self.assertEqual(packet[38:44], b'\x01\x04\x00\x00\x00\x00')
+        self.assertEqual(packet[44:50], b'\x00\x3a\x00\x00\x00\x00')
+        wide = ctl.template_info_set_request(3, 'AB', [], [], attr=1)
+        self.assertEqual((wide[5] << 8) | wide[6], 44)
+        self.assertEqual(wide[50], 1)
+        for bad in ((5, 'x'), (-1, 'x')):
+            with self.assertRaises(ValueError):
+                ctl.template_info_set_request(*bad)
+        with self.assertRaises(ValueError):
+            ctl.template_info_set_request(0, 'x', attr=256)
+
+    def test_key_name_frames(self):
+        packet = ctl.key_name_set_request(2, 1, 'HI')
+        self.assertEqual(packet[1:7], bytes([0xAA, 0xDD, 0x46, 0x40, 0x00, 32]))
+        self.assertEqual(packet[7], 2)
+        self.assertEqual(packet[8], 1)
+        self.assertEqual(packet[9:39], b'HI' + bytes(28))
+        get = ctl.key_name_get_request(2, 1)
+        self.assertEqual(get[1:9], bytes([0xAA, 0xDD, 0x47, 0x40, 0x00, 0x02, 2, 1]))
+        for bad in ((5, 0), (0, 2), (0, -1)):
+            with self.assertRaises(ValueError):
+                ctl.key_name_get_request(*bad)
+
+    def test_vibe_ack_payload_is_zero(self):
+        # Live 0x44 reply: 55 bb dd 44 80 00 01 00 - success carries a 00 byte.
+        frame = _pad(bytes.fromhex('55bbdd4480000100'))
+        self.assertEqual(ctl.parse_reply(frame, ctl.VIBE_INFO_SET),
+                         bytes([ctl.VIBE_ACK_PAYLOAD]))
+        # That is exactly why a template write cannot use the setting ack parser.
+        with self.assertRaises(ValueError):
+            ctl.parse_set_ack(frame, ctl.VIBE_INFO_SET)
+
+    def test_parse_live_template_info(self):
+        info = ctl.parse_template_info(self.TEMPLATE_0)
+        self.assertEqual(info.num, 0)
+        self.assertEqual(info.name, 'WorkBuddy 快捷键')
+        self.assertEqual(ctl.format_hotkey6(info.work1), 'LCtrl+D')
+        self.assertEqual(ctl.format_hotkey6(info.work2), 'ENTER')
+        self.assertIsNone(info.attr)
+        self.assertFalse(info.is_empty)
+
+    def test_empty_slot_and_mask(self):
+        blank = bytes(43)
+        self.assertTrue(ctl.parse_template_info(blank).is_empty)
+        filled = ctl.parse_template_info(self.TEMPLATE_0)
+        self.assertEqual((filled.num, filled.name), (0, 'WorkBuddy 快捷键'))
+        self.assertIsNone(ctl.parse_template_info(b'\x00' * 42))
+        self.assertEqual(ctl.template_availability(b'\x05'),
+                         (True, False, True, False, False))
+        self.assertIsNone(ctl.template_availability(b''))
+        self.assertIsNone(ctl.template_availability(self.TEMPLATE_0))
+        # Only a one byte mask is a mask; a truncated record is not.
+        self.assertIsNone(ctl.template_availability(b'\xff' * 40))
+
+    def test_parse_live_key_names(self):
+        single = ctl.parse_key_name(self.KEY_0_0)
+        double = ctl.parse_key_name(self.KEY_0_1)
+        self.assertEqual((single.num, single.key_index, single.name), (0, 0, '语音输入'))
+        self.assertEqual((double.num, double.key_index, double.name), (0, 1, '发送'))
+        self.assertIsNone(ctl.parse_key_name(self.KEY_0_0[:31]))
+
+    def test_parse_template_config(self):
+        cfg = ctl.parse_template_config(self.TEMPLATE_CFG)
+        self.assertEqual((cfg.work_mode, cfg.tx1_template, cfg.tx2_template, cfg.led_mode),
+                         (0, 0, 0, 0))
+        self.assertIsNone(ctl.parse_template_config(b'\x00\x00\x00'))
+
+    def test_parse_reply_frame(self):
+        frame = _pad(bytes.fromhex('55bbdd45' '80002b') + self.TEMPLATE_0)
+        self.assertEqual(ctl.parse_reply(frame, ctl.VIBE_INFO_GET), self.TEMPLATE_0)
+        self.assertIsNone(ctl.parse_reply(frame, ctl.VIBE_TEMPLATE_GET))
+        self.assertIsNone(ctl.parse_reply(frame[:6], ctl.VIBE_INFO_GET))
+        self.assertIsNone(ctl.parse_reply(b'', ctl.VIBE_INFO_GET))
+        self.assertIsNone(ctl.parse_reply(_pad(self.TEMPLATE_0), ctl.VIBE_INFO_GET))
