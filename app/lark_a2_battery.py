@@ -6,7 +6,8 @@ Wire facts come from the official WebHID page (res.hollyland.com/6118):
   response: BB DD | cmd | device | len_hi len_lo | payload
   HEART_GET = 0x10, RX device byte = 0x40
   heart payload: [0]=tx1 online [1]=tx2 online [2]=tx1 level [3]=tx2 level
-                 [6]=noise level [15]=tx1 mute/charge in low bits, tx2 in high
+                 [6]=noise level
+                 [15]=bit0 tx1 muted, bit1 tx2 muted, bit2 tx1 charging, bit3 tx2 charging
 Only the read path is implemented; nothing here writes device settings.
 """
 
@@ -16,6 +17,7 @@ REPORT_ID = 0x55
 PACKET_SIZE = 63
 HEART_GET = 0x10
 DEVICE_RX = 0x40
+DEVICE_REPLY_RX = 0x80
 FRAME_HEAD = 0xAA, 0xDD
 REPLY_HEAD = 0xBB, 0xDD
 
@@ -24,7 +26,7 @@ def matches(iface):
     """The 0xFF90 vendor page that carries the 6118 frame format."""
     return (iface.vid == VID and iface.pid == PID
             and iface.usage_page == 0xFF90
-            and iface.input_len >= 64 and iface.output_len >= 64)
+            and iface.input_len == 64 and iface.output_len == 64)
 
 
 def request():
@@ -38,22 +40,32 @@ def request():
 
 
 def decode(raw):
-    """Return (level, status) for the lowest online transmitter, or None."""
+    """Return (level, status) for the lowest online transmitter, or None.
+
+    Only the receiver heartbeat (device byte 0x80) is parsed: transmitter frames
+    reuse the command byte but their payload layout is not verified here, so a
+    0x81/0x82 frame is rejected instead of being read as battery data.
+    """
     r = bytes(raw or b'')
     off = 1 if len(r) > 6 and r[0] == REPORT_ID else 0
     if len(r) < off + 6 + 16:
         return None
-    if (r[off], r[off + 1]) != REPLY_HEAD or r[off + 2] != HEART_GET:
+    if ((r[off], r[off + 1]) != REPLY_HEAD
+            or r[off + 2] != HEART_GET or r[off + 3] != DEVICE_REPLY_RX):
         return None
     length = (r[off + 4] << 8) | r[off + 5]
     payload = r[off + 6:off + 6 + length]
     if len(payload) < 16:
         return None
-    tx1, tx2 = payload[0] == 1, payload[1] == 1
-    levels = [payload[2] if tx1 else None, payload[3] if tx2 else None]
-    live = [level for level in levels if level is not None and level <= 100]
+    flags = payload[15]
+    # Keep each transmitter's own charging bit: the lowest level must not
+    # inherit the other transmitter's charging state.
+    live = []
+    if payload[0] == 1 and payload[2] <= 100:
+        live.append((payload[2], flags & 0x04))
+    if payload[1] == 1 and payload[3] <= 100:
+        live.append((payload[3], flags & 0x08))
     if not live:
         return None
-    flags = payload[15]
-    charging = (tx1 and flags & 0x04) or (tx2 and flags & 0x08)
-    return min(live), 'charging' if charging else 'discharging'
+    level, charging = min(live, key=lambda item: item[0])
+    return level, 'charging' if charging else 'discharging'

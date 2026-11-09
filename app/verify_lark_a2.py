@@ -38,6 +38,34 @@ class LarkA2Tests(unittest.TestCase):
         raw[7] = raw[8] = 0
         self.assertIsNone(lark.decode(bytes(raw)))
 
+    def test_charging_bit_belongs_to_its_own_transmitter(self):
+        raw = bytearray(self.raw)
+        raw[8] = 1      # TX2 online
+        raw[10] = 5     # TX2 level
+        raw[22] = 0x04  # TX1 charging only
+        self.assertEqual(lark.decode(bytes(raw)), (5, 'discharging'))
+
+    def test_charging_flag_is_reported(self):
+        raw = bytearray(self.raw)
+        raw[22] = 0x04
+        self.assertEqual(lark.decode(bytes(raw)), (98, 'charging'))
+
+    def test_transmitter_frame_is_rejected(self):
+        raw = bytearray(self.raw)
+        raw[4] = 0x81
+        self.assertIsNone(lark.decode(bytes(raw)))
+
+    def test_reply_without_report_id_and_oversized_length(self):
+        self.assertEqual(lark.decode(self.raw[1:]), (98, 'discharging'))
+        raw = bytearray(self.raw)
+        raw[5] = raw[6] = 0xFF
+        self.assertEqual(lark.decode(bytes(raw)), (98, 'discharging'))
+
+    def test_ui_kind_maps_to_microphone(self):
+        import ui_theme
+        self.assertEqual(ui_theme.device_kind('猛玛 LARK A2 无线麦克风'), 'microphone')
+        self.assertEqual(ui_theme.device_kind('Wireless Microphone'), 'microphone')
+
     def test_matches_only_the_6118_vendor_page(self):
         self.assertTrue(lark.matches(self.iface))
         self.iface.usage_page = 0xFF82

@@ -141,6 +141,8 @@ def device_kind(title, headset=False):
         return 'controller'
     if any(k in title for k in ('音箱', '音响', 'speaker', 'tribit')):
         return 'speaker'
+    if any(k in title for k in ('麦克风', 'microphone')):
+        return 'microphone'
     if headset or any(k in title for k in ('headset', 'headphone', '耳机', 'earphone', 'buds', 'darkrim')):
         return 'headset'
     if any(k in title for k in ('keyboard', '键盘', 'cyberboard', 'azoth', 'falchion', 'scope')):
@@ -306,6 +308,10 @@ class DeviceGlyph(tk.Canvas):
             self.create_arc(3*s,2*s,21*s,20*s,start=0,extent=180,style='arc',outline=color,width=2*s)
             for x in (3,17):
                 self.create_rectangle(x*s,11*s,(x+4)*s,20*s,outline=color,width=1.7*s)
+        elif kind == 'microphone':
+            self.create_oval(9*s,2*s,15*s,14*s,outline=color,width=1.7*s)
+            line((12,14,12,19))
+            self.create_arc(6*s,13*s,18*s,24*s,start=180,extent=180,style='arc',outline=color,width=1.6*s)
         else:
             self.create_arc(5*s,2*s,19*s,16*s,start=0,extent=180,style='arc',outline=color,width=1.7*s)
             line((5,9,5,11,19,11,19,9))

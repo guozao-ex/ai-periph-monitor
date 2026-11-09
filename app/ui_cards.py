@@ -64,7 +64,7 @@ class DeviceCard:
         kind=ui.device_kind(r.title+' '+r.subtitle)
         self.icon.show(r.title,kind)
         self.lab_title.configure(text=r.title.lstrip('🖱️⌨️🎧 '))
-        device_type={'mouse':'鼠标','keyboard':'键盘','headset':'耳机','controller':'手柄','speaker':'音箱'}[kind]
+        device_type={'mouse':'鼠标','keyboard':'键盘','headset':'耳机','controller':'手柄','speaker':'音箱','microphone':'麦克风'}[kind]
         self.lab_sub.configure(text=r.subtitle if device_type in r.subtitle else f'{device_type} · {r.subtitle}' if r.subtitle else device_type)
         self.btn_edit.configure(state='normal' if r.key else 'disabled')
         self.level=r.level
