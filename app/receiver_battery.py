@@ -10,6 +10,7 @@ import time
 from hid_win import HidDevice
 import wireless_battery as wireless
 import sony_inzone_battery as sony
+import lark_a2_battery as lark
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ _add(0x1038, 'nova5', {0x2269: '赛睿 Arctis Nova 3P Wireless 耳机',
 _add(0x1038, 'arctis_gamebuds', {0x230A: '赛睿 Arctis GameBuds 耳机'})
 _add(0x054C, 'sony_inzone', {0x0EBF: '索尼 INZONE H5 耳机',
                             0x0FA8: '索尼 INZONE H9 II 耳机'})
+_add(0x3547, 'lark_a2', {0x0411: '猛玛 LARK A2 无线麦克风'})
 _add(0x37D7, 'flydigi_apex5', {0x2501: '飞智八爪鱼5 手柄'})
 _add(0x37D7, 'flydigi_vader5', {0x2401: '飞智黑武士5 Pro 手柄'})
 _add(0x1038, 'steel_mouse', {
@@ -164,6 +166,8 @@ def matches(iface):
         return (page, usage) == (0xFF13, 0xFF00) and inp == out == 64
     if p.protocol == 'sony_inzone':
         return (page, usage) == (0xFF04, 2 if iface.pid == 0x0EBF else 1) and inp == out == 64
+    if p.protocol == 'lark_a2':
+        return lark.matches(iface)
     if p.protocol.startswith(('nova', 'arctis')):
         return (page, usage) == (0xFFC0, 1) and out in (64, 65) and 16 <= inp <= 129
     if p.protocol == 'hyperx2':
@@ -206,6 +210,9 @@ def _steps(value, status):
 def decode(protocol, raw):
     """Reject unrelated, truncated, offline, invalid and request-echo reports."""
     r = bytes(raw or b'')
+    if protocol == 'lark_a2':
+        result = lark.decode(r)
+        return _percentage(*result) if result else None
     if protocol in ('rog_harpe2', 'rog_pelta'):
         rid = 3 if protocol == 'rog_harpe2' else 0xCC
         if (len(r) != 64 or r[:3] != bytes((rid, 0x12, 7))
@@ -406,6 +413,12 @@ def query(dev, iface):
             result = sony.decode(raw, tid)
             return _percentage(*result) if result else None
         result, raw = _input_query(dev, iface, packet, parse_sony)
+        return replace(result, raw=raw) if result else None
+    if protocol == 'lark_a2':
+        def parse_lark(raw):
+            decoded = lark.decode(raw)
+            return _percentage(*decoded) if decoded else None
+        result, raw = _input_query(dev, iface, lark.request(), parse_lark)
         return replace(result, raw=raw) if result else None
     if protocol in ('gw_new', 'gw_old'):
         body = bytes.fromhex('000002020083') if protocol == 'gw_new' else bytes.fromhex('00028f01')

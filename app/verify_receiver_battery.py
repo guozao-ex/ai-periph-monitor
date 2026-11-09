@@ -28,6 +28,7 @@ def iface(vid, pid, protocol=None):
         'eightbitdo_pro3': (1, 5, 64, 0, 64),
         'hyperx_alpha2': (0xFF13, 0xFF00, 64, 64, 0),
         'sony_inzone': (0xFF04, 2 if pid == 0x0EBF else 1, 64, 64, 0),
+        'lark_a2': (0xFF90, 1, 64, 64, 0),
         'flydigi_apex5': (0xFFA0, 1, 64, 32, 0),
         'flydigi_vader5': (0xFFA0, 1, 33, 33, 0),
     }.get(protocol, (0xFFC0, 1, 64, 64, 0))

@@ -1,5 +1,13 @@
 # 更新日志
 
+## fork 本地适配 — 2026-11-09（猛玛 LARK A2 无线麦克风）
+
+- 新增猛玛（HOLLYLAND）LARK A2 无线麦克风电量读取：`3547:0411`、`0xFF90` 厂商页、report id `0x55`。
+- 协议来自官方 WebHID 页面 [res.hollyland.com/6118](https://res.hollyland.com/6118/index.html)：帧 `AA DD | cmd | device | len16 | payload`，`HEART_GET = 0x10`、接收器设备字节 `0x40`；回包 `BB DD` 开头，发射器电量在 payload byte 2 / byte 3。
+- 实机回包 `55bbdd1080001001006200...`：TX1 在线 98%、TX2 离线、未充电。双发射器取在线最低值；全部离线时报未知，不伪造百分比。
+- 本次只实现读取，不写降噪、模板、语言等任何设置命令；未触发的写入路径一律不开放。
+- 详细帧结构与验证边界见[LARK A2 适配说明](docs/适配说明-LARKA2.md)。
+
 ## fork 本地适配 — 2026-11-09（ATK X1 Ultimate 大师版 · 8K 接收器）
 
 本条目来自个人 fork（guozao-ex/ai-periph-monitor），不是上游发布。
