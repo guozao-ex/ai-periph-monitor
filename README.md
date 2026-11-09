@@ -64,6 +64,14 @@ python tools/peripheral_diagnostic/peripheral_diagnostic.py --help
 
 诊断工具无参数运行会实际读取设备并导出本地日志。详见[诊断说明](tools/peripheral_diagnostic/使用说明与适配指南.md)。
 
+### 精简入口（只带 ATK X1 与 LARK A2）
+
+```powershell
+python app/lite_main.py
+```
+
+一个窗口两个页签：**ATK 烈空 X1**（电量、DPI 档位读设、轮询率读设、传感器采样率读设）与**猛玛 LARK A2**（声道/降噪/音量/灯/模板/监听等整套设置）。这个入口只导入 `hid_win`、`atk_core`、`lark_*`、`ui_theme`，不会带进其它品牌的协议模块，适合自己打包成小体积 exe。
+
 ## 构建与验证
 
 ```powershell
