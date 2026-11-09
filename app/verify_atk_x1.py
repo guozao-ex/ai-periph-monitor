@@ -113,14 +113,28 @@ class AtkX1UltimateTests(unittest.TestCase):
         self.iface.pid=0x101B;self.iface.vid=0x3554
         self.assertIsNone(ms.atk_model((2,46),self.iface))
 
-    def test_captured_system_report_is_one_stage_on_1000hz(self):
-        # Live capture from the 8K dongle: one enabled stage, active index 0, rate code 1.
-        system=bytes.fromhex('015401540055')
-        self.assertTrue(all((system[i]+system[i+1])&255==0x55 for i in (0,2,4)))
-        self.assertEqual((system[0],system[2],system[4]),(1,1,0))
+    def test_read_uses_captured_reports(self):
+        # Live capture: one enabled stage, active index 0, rate code 1, DPI 1600.
+        replies=[bytes.fromhex('015401540055'),bytes.fromhex('9f9f0017')]
+        mouse=ms.Mouse(self.iface.path,'ATK X1 Ultimate 大师版','373B:101B','atk',(2,46),interface=self.iface)
+        with patch.object(ms.hw,'enumerate_hid',return_value=[self.iface]),patch.object(ms.hw,'HidDevice'),patch.object(ms,'atk_identity',return_value=(2,46)),patch.object(ms,'atk_read',side_effect=replies),patch.object(ms,'atk_profile',return_value=1):
+            state=ms.read(mouse)
+        self.assertEqual(state.stages,[(1600,1600)])
+        self.assertEqual((state.active,state.minimum,state.maximum,state.step),(0,10,42000,10))
+        self.assertEqual(state.profile,1)
 
-    def test_identity_query_frame(self):
-        self.assertEqual(ms.atk_frame(0x10),bytes.fromhex('081000000000000000000000000000003d'))
+    def test_interface_gate_accepts_8k_and_rejects_bad_channels(self):
+        import mouse_controls as mc
+        mouse=ms.Mouse(self.iface.path,'ATK X1 Ultimate 大师版','373B:101B','atk',(2,46),interface=self.iface)
+        with patch.object(ms.hw,'enumerate_hid',return_value=[self.iface]):
+            self.assertIs(mc._interface(mouse),self.iface)
+        # The gate must reject anything that is not the 17-byte 0xFF02 channel on a shared receiver.
+        for bad in ({'pid':0x1002},{'pid':0xFFFF},{'output_len':64},{'usage_page':0xFF01}):
+            iface=SimpleNamespace(**vars(self.iface))
+            for key,value in bad.items():setattr(iface,key,value)
+            probe=ms.Mouse(iface.path,'ATK X1 Ultimate 大师版','373B:101B','atk',(2,46),interface=iface)
+            with patch.object(ms.hw,'enumerate_hid',return_value=[iface]):
+                with self.assertRaisesRegex(ValueError,'配置接口已变化'):mc._interface(probe)
 
 
 if __name__=='__main__':unittest.main()

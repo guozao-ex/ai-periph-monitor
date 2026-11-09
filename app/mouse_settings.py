@@ -40,6 +40,16 @@ class DpiState:
     protocol_data: object = field(default=None, repr=False)
 
 
+# Shared ATK receivers that expose the 17-byte 0xFF02 config channel.
+# Keep this as the single source of truth: mouse_controls gates on it too.
+ATK_RECEIVER_PIDS = frozenset((0x102F, 0x101A, 0x101B))
+
+
+def atk_receiver(iface):
+    """True when the interface is one of the shared ATK receivers."""
+    return iface.vid == 0x373B and iface.pid in ATK_RECEIVER_PIDS
+
+
 ATK_MODELS = {
     (1,8): ('ATK F1 Ultimate 2.0', 'ultra', 10, 42000),
     (2,39): ('ATK X1 Pro Max', 'step50', 50, 36000),
@@ -54,7 +64,7 @@ def atk_model(identity, iface):
     # X1 Ultra / X1 Ultimate: official USB identity plus the shared ATK receivers.
     # A shared receiver PID alone never identifies the mouse behind it.
     # (2,46) is the X1 Ultimate 大师版 identity read back from a 373B:101B 8K dongle.
-    if identity in ((2,43),(2,46)) and (iface.vid != 0x373B or iface.pid not in (0x102F,0x101A,0x101B)):
+    if identity in ((2,43),(2,46)) and not atk_receiver(iface):
         return None
     if identity == r1nk.IDENTITY and not r1nk.receiver(iface):
         return None
