@@ -164,10 +164,13 @@ def build_ui():
     mark.create_rectangle(20,12,28,16, fill=ui.ACCENT, outline='')
     mark.create_polygon(26,21,18,32,24,32,22,40,31,28,25,28,fill=ui.ACCENT)
     from ui_mouse_pages import NavigationButton, MouseSettingsPage, DeviceTestPage
+    from ui_lark_pages import LarkSettingsPage
     devices_nav = NavigationButton(rail, text='设备', icon='devices', active=True)
     devices_nav.pack(fill='x', pady=(0,6))
     mouse_nav = NavigationButton(rail, text='外设设置', icon='mouse')
     mouse_nav.pack(fill='x', pady=(0,6))
+    mic_nav = NavigationButton(rail, text='麦克风', icon='mic')
+    mic_nav.pack(fill='x', pady=(0,6))
     test_nav = NavigationButton(rail, text='设备测试', icon='test')
     test_nav.pack(fill='x', pady=(0,6))
     settings_button = NavigationButton(rail, text='设置', icon='settings')
@@ -254,9 +257,12 @@ def build_ui():
     # Only one page is visible. Device cards and quick controls stay in content.
     settings_window = ttk.Frame(workspace)
     mouse_page = MouseSettingsPage(workspace)
+    mic_page = LarkSettingsPage(workspace)
     test_page = DeviceTestPage(workspace)
-    pages = {'devices':content, 'mouse':mouse_page, 'test':test_page, 'settings':settings_window}
-    navs = {'devices':devices_nav, 'mouse':mouse_nav, 'test':test_nav, 'settings':settings_button}
+    pages = {'devices':content, 'mouse':mouse_page, 'mic':mic_page, 'test':test_page,
+             'settings':settings_window}
+    navs = {'devices':devices_nav, 'mouse':mouse_nav, 'mic':mic_nav, 'test':test_nav,
+            'settings':settings_button}
     current_page = ['devices']
     settings_open = [False]
     def show_page(name):
@@ -281,6 +287,7 @@ def build_ui():
     devices_nav.configure(command=close_settings)
     settings_button.configure(command=open_settings)
     mouse_nav.configure(command=lambda:show_page('mouse'))
+    mic_nav.configure(command=lambda:show_page('mic'))
     test_nav.configure(command=lambda:show_page('test'))
     settings_head = ttk.Frame(settings_window, padding=(24, 22, 24, 16))
     settings_head.pack(fill="x")
