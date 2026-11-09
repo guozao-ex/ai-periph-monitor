@@ -9,7 +9,9 @@
 所以打包时其余品牌模块不会被带进来。
 """
 import queue
+import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -283,6 +285,21 @@ class LiteApp(tk.Tk):
         self.configure(bg=ui.BG)
         ui.select_theme('light')
         ui.configure(self)
+        bar = ttk.Frame(self, padding=(14, 10, 14, 6))
+        bar.pack(fill='x')
+        self.lab_tray = ttk.Label(bar, text='托盘：未启动', style='Muted.TLabel')
+        self.lab_tray.pack(side='right')
+        self.btn_tray = ttk.Button(bar, text='启动托盘', command=self.on_tray_toggle)
+        self.btn_tray.pack(side='right', padx=(0, 10))
+        self.tray_jobs = queue.Queue()
+        self.tray_busy = False
+        self.alive = True
+        self.tray_after = None          # 2 s status poll
+        self.tray_poll_after = None     # 300 ms result poll
+        self.tray_notice = ''
+        self.tray_notice_until = 0.0
+        self.tray_after = self.after(300, self.refresh_tray)
+
         self.book = book = ttk.Notebook(self)
         book.pack(fill='both', expand=True)
         self.atk = AtkPanel(book)
@@ -291,6 +308,73 @@ class LiteApp(tk.Tk):
         book.add(self.lark, text='麦克风 LARK A2')
         book.bind('<<NotebookTabChanged>>', self._tab_changed)
         self.atk.refresh()
+
+    # ------------------------------------------------------------- tray
+    @staticmethod
+    def _tray_module():
+        """Imported lazily so the lean entry still starts without the tray stack."""
+        import tray_common as tc
+        return tc
+
+    def refresh_tray(self):
+        """One 2 s chain: show the notice for a few seconds, then the real state."""
+        if not self.alive:
+            return
+        try:
+            running = self._tray_module().is_tray_running()
+        except Exception:
+            running = False
+        if not self.tray_busy:
+            self.btn_tray.configure(text='退出托盘' if running else '启动托盘')
+        if self.tray_notice and time.time() < self.tray_notice_until:
+            self.lab_tray.configure(text=self.tray_notice)
+        else:
+            self.lab_tray.configure(text='托盘：运行中' if running else '托盘：未启动')
+        try:
+            if self.tray_after is not None:
+                self.after_cancel(self.tray_after)
+            self.tray_after = self.after(2000, self.refresh_tray)
+        except tk.TclError:
+            self.alive = False
+
+    def on_tray_toggle(self):
+        if self.tray_busy:
+            return
+        self.tray_busy = True
+        self.btn_tray.configure(state='disabled', text='处理中…')
+
+        def worker():
+            try:
+                tc = self._tray_module()
+                if tc.is_tray_running():
+                    tc.post_to_tray(tc.MSG_QUIT)
+                    ok = True
+                else:
+                    ok = tc.start_tray_app()
+            except Exception as exc:      # noqa: BLE001
+                ok = False
+                print('tray error:', exc)
+            self.tray_jobs.put(ok)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._poll_tray()
+
+    def _poll_tray(self):
+        try:
+            ok = self.tray_jobs.get_nowait()
+        except queue.Empty:
+            self.tray_poll_after = self.after(300, self._poll_tray)
+            return
+        self.tray_busy = False
+        self.btn_tray.configure(state='normal')
+        # Keep the outcome on screen for a moment; the 2 s chain must not
+        # overwrite it in the same frame.
+        self.tray_notice = '托盘：运行中' if ok else '托盘：操作失败，稍后重试'
+        self.tray_notice_until = time.time() + (1.5 if ok else 4.0)
+        self.lab_tray.configure(text=self.tray_notice)
+        # Refresh right away so the button label follows the new state. The
+        # chain cancels its own pending timer, so this cannot fork a second one.
+        self.refresh_tray()
 
     def _tab_changed(self, _event=None):
         """The LARK page reads the device when it becomes visible."""
@@ -301,17 +385,32 @@ class LiteApp(tk.Tk):
             pass
 
     def destroy(self):
+        self.alive = False
         try:
             self.atk.alive = False
         except Exception:
             pass
+        for attr in ('tray_after', 'tray_poll_after'):
+            after_id = getattr(self, attr, None)
+            if after_id is not None:
+                try:
+                    self.after_cancel(after_id)
+                except tk.TclError:
+                    pass
+                setattr(self, attr, None)
         super().destroy()
 
 
 def main():
+    # Frozen builds route the tray to this same executable (tray_common builds
+    # [sys.executable, "--tray"]), so that argument must not open a second UI.
+    if '--tray' in sys.argv:
+        import tray_app
+        return tray_app.main()
     app = LiteApp()
     app.geometry('960x680')
     app.mainloop()
+    return 0
 
 
 if __name__ == '__main__':

@@ -70,7 +70,7 @@ python tools/peripheral_diagnostic/peripheral_diagnostic.py --help
 python app/lite_main.py
 ```
 
-一个窗口两个页签：**ATK 烈空 X1**（电量、DPI 档位读设、轮询率读设、传感器采样率读设）与**猛玛 LARK A2**（声道/降噪/音量/灯/模板/监听等整套设置）。这个入口只导入 `hid_win`、`atk_core`、`lark_*`、`ui_theme`，不会带进其它品牌的协议模块，适合自己打包成小体积 exe。
+一个窗口两个页签：**ATK 烈空 X1**（电量、DPI 档位读设、轮询率读设、传感器采样率读设）与**猛玛 LARK A2**（声道/降噪/音量/灯/模板/监听等整套设置）。这个入口只导入 `hid_win`、`atk_core`、`lark_*`、`ui_theme`，不会带进其它品牌的协议模块，适合自己打包成小体积 exe。右上角有「启动托盘 / 退出托盘」按钮：窗口起来后只轻量加载 `tray_common`（带 `win_link`/`win_shell`，不拉设备协议模块），托盘进程点击才启动；它与主程序用的是同一个托盘单例，启动时也会按原设置拉起桌面挂件。
 
 ## 构建与验证
 
