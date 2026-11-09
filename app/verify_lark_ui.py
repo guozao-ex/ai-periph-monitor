@@ -122,6 +122,14 @@ class LarkPageTests(unittest.TestCase):
         self.assertEqual(saved[4], ctl.encode_hotkey6(['F1']))
         self.assertEqual(saved[5:], ('单击', '双击'))
 
+    def test_clear_refuses_a_template_a_transmitter_uses(self):
+        # Slot 0 is what MIC1 applies in the fixture state, so clearing it must
+        # be refused with an explanation instead of leaving the mic orphaned.
+        self.page.run = self.run_now
+        self.page.on_template_clear(0)
+        self.assertNotIn(('clear_template', 0), self.session.calls)
+        self.assertIn('正被', self.page.message.cget('text'))
+
     def test_clear_and_settings_actions(self):
         self.page.run = self.run_now
         self.page.on_template_clear(3)

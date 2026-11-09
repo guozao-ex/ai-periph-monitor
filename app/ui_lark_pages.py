@@ -48,7 +48,9 @@ class LarkSettingsPage(ttk.Frame):
         self._template_section()
         self._settings_section()
 
-        self.poll_id = self.after(100, self.poll)
+        self.alive = True
+        self.poll_id = None
+        self._schedule()
         self.bind('<Destroy>', self.destroyed, add='+')
 
     # ---------------------------------------------------------------- layout
@@ -181,6 +183,7 @@ class LarkSettingsPage(ttk.Frame):
     # ------------------------------------------------------------- job queue
     def destroyed(self, event):
         if event.widget is self:
+            self.alive = False
             self.generation += 1
             try:
                 self.after_cancel(self.poll_id)
@@ -230,8 +233,18 @@ class LarkSettingsPage(ttk.Frame):
         except queue.Empty:
             pass
         finally:
-            if self.winfo_exists():
-                self.poll_id = self.after(100, self.poll)
+            self._schedule()
+
+    def _schedule(self):
+        """Keep exactly one pending poll timer, even when tests call poll()."""
+        if not self.alive:
+            return
+        try:
+            if self.poll_id is not None:
+                self.after_cancel(self.poll_id)
+            self.poll_id = self.after(100, self.poll)
+        except tk.TclError:
+            self.alive = False
 
     def set_busy(self, value):
         self.busy = value
@@ -328,6 +341,14 @@ class LarkSettingsPage(ttk.Frame):
         self._action(work, '正在保存模板 %d …' % (num + 1))
 
     def on_template_clear(self, num):
+        # The app reassigns a transmitter before deleting its template; refuse
+        # instead of leaving a microphone pointed at an empty slot.
+        state = self.state
+        if state is not None and num in (state.config.tx1_template, state.config.tx2_template):
+            self.message.configure(
+                text='模板 %d 正被 MIC1/MIC2 使用：先把「MIC1 模板 / MIC2 模板」改到别的模板，再清空。'
+                     % (num + 1))
+            return
         self._action(lambda: self.session.clear_template(num), '正在清空模板 %d …' % (num + 1))
 
     def on_speaker(self):
