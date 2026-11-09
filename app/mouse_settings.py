@@ -44,15 +44,17 @@ ATK_MODELS = {
     (1,8): ('ATK F1 Ultimate 2.0', 'ultra', 10, 42000),
     (2,39): ('ATK X1 Pro Max', 'step50', 50, 36000),
     (2,43): ('ATK X1 Ultra', 'ultra', 10, 42000),
+    (2,46): ('ATK X1 Ultimate 大师版', 'ultra', 10, 42000),
     (2,83): ('ATK A9 Plus NearLink', 'step50', 100, 30000),
     r1nk.IDENTITY: (r1nk.MODEL, 'paw3395se', r1nk.MIN_DPI, r1nk.MAX_DPI),
 }
 
 
 def atk_model(identity, iface):
-    # X1 Ultra: official USB identity plus the two shared ATK receivers.
+    # X1 Ultra / X1 Ultimate: official USB identity plus the shared ATK receivers.
     # A shared receiver PID alone never identifies the mouse behind it.
-    if identity == (2,43) and (iface.vid != 0x373B or iface.pid not in (0x102F,0x101A,0x101B)):
+    # (2,46) is the X1 Ultimate 大师版 identity read back from a 373B:101B 8K dongle.
+    if identity in ((2,43),(2,46)) and (iface.vid != 0x373B or iface.pid not in (0x102F,0x101A,0x101B)):
         return None
     if identity == r1nk.IDENTITY and not r1nk.receiver(iface):
         return None

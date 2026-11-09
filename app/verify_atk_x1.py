@@ -94,4 +94,33 @@ class AtkX1Tests(unittest.TestCase):
         self.assertEqual(writes[0].args[0],ms.atk_frame(7,(0,0,16,4,*bytes.fromhex('6363008f'))))
 
 
+class AtkX1UltimateTests(unittest.TestCase):
+    """X1 Ultimate 大师版: identity (2,46) captured from a 373B:101B 8K dongle."""
+
+    def setUp(self):
+        self.iface = SimpleNamespace(path='atk-x1u-test',vid=0x373B,pid=0x101B,
+            usage_page=0xFF02,usage=2,output_len=17,input_len=17,
+            vid_pid='373B:101B',product='ATK Mouse 8K Dongle')
+
+    def test_identity_spec_and_range(self):
+        self.assertEqual(ms.ATK_MODELS[(2,46)],('ATK X1 Ultimate 大师版','ultra',10,42000))
+        self.assertEqual(ms.atk_model((2,46),self.iface),ms.ATK_MODELS[(2,46)])
+
+    def test_unknown_receivers_stay_rejected(self):
+        for pid in (0x1002,0x1019,0x101C,0xFFFF):
+            self.iface.pid=pid
+            self.assertIsNone(ms.atk_model((2,46),self.iface))
+        self.iface.pid=0x101B;self.iface.vid=0x3554
+        self.assertIsNone(ms.atk_model((2,46),self.iface))
+
+    def test_captured_system_report_is_one_stage_on_1000hz(self):
+        # Live capture from the 8K dongle: one enabled stage, active index 0, rate code 1.
+        system=bytes.fromhex('015401540055')
+        self.assertTrue(all((system[i]+system[i+1])&255==0x55 for i in (0,2,4)))
+        self.assertEqual((system[0],system[2],system[4]),(1,1,0))
+
+    def test_identity_query_frame(self):
+        self.assertEqual(ms.atk_frame(0x10),bytes.fromhex('081000000000000000000000000000003d'))
+
+
 if __name__=='__main__':unittest.main()

@@ -86,6 +86,9 @@ class ControlTests(unittest.TestCase):
             mc.apply(before,rate=125)
             device.return_value.__enter__.return_value.write_output.assert_called_once_with(ms.atk_frame(7,(0,0,0,2,8,0x4d)),use_hidd=False)
         iface.pid=0x101B
+        # 8K dongle now carries the same identity query; unknown PIDs stay rejected.
+        self.assertTrue(mc.supported(mouse))
+        iface.pid=0xFFFF
         self.assertFalse(mc.supported(mouse))
 
     def test_hidden_ui_render_busy_validation_and_submit(self):

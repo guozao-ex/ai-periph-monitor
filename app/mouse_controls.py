@@ -39,7 +39,8 @@ def supported(mouse):
         return iface is not None and am_battery.matches_interface(iface) and (iface.vid,iface.pid) == mouse.identity
     return (mouse.protocol == 'rog' and mouse.identity in ((0x1A94, 3), (0x1A94, 0), (0x1A92, 0), (0x1A92, 3))) or (
         mouse.protocol == 'atk' and mouse.identity in ms.ATK_MODELS and iface is not None
-        and ((iface.vid, iface.pid) == (0x373B, 0x101A) and ms.atk_model(mouse.identity,iface) is not None
+        and ((iface.vid, iface.pid) in ((0x373B, 0x102F), (0x373B, 0x101A), (0x373B, 0x101B))
+             and ms.atk_model(mouse.identity,iface) is not None
              or mouse.identity == r1nk.IDENTITY and r1nk.receiver(iface)))
 
 
@@ -54,8 +55,9 @@ def _interface(mouse):
             (iface.pid == 0x1ACE and iface.usage_page == 0xFF01 and iface.output_len == 64 and mouse.identity[1] == 3)
             or (iface.pid == mouse.identity[0] and iface.output_len == 65 and mouse.identity[1] == 0)))
     else:
-        valid = (((iface.vid, iface.pid, iface.usage_page, iface.usage, iface.output_len)
-                 == (0x373B, 0x101A, 0xFF02, 2, 17) and ms.atk_model(mouse.identity,iface) is not None)
+        valid = (((iface.vid, iface.pid) in ((0x373B, 0x102F), (0x373B, 0x101A), (0x373B, 0x101B))
+                  and (iface.usage_page, iface.usage, iface.output_len) == (0xFF02, 2, 17)
+                  and ms.atk_model(mouse.identity,iface) is not None)
                  or mouse.identity == r1nk.IDENTITY and r1nk.receiver(iface))
     if not valid:
         raise ValueError('配置接口已变化，请重新读取设备')
