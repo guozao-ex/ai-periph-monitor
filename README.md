@@ -70,7 +70,25 @@ python tools/peripheral_diagnostic/peripheral_diagnostic.py --help
 python app/lite_main.py
 ```
 
-一个窗口两个页签：**ATK 烈空 X1**（电量、DPI 档位读设、轮询率读设、传感器采样率读设）与**猛玛 LARK A2**（声道/降噪/音量/灯/模板/监听等整套设置）。这个入口只导入 `hid_win`、`atk_core`、`lark_*`、`ui_theme`，不会带进其它品牌的协议模块，适合自己打包成小体积 exe。右上角有「启动托盘 / 退出托盘」按钮：窗口起来后只轻量加载 `tray_common`（带 `win_link`/`win_shell`，不拉设备协议模块），托盘进程点击才启动；它与主程序用的是同一个托盘单例，启动时也会按原设置拉起桌面挂件。
+一个窗口两个页签：**ATK 烈空 X1**（电量、DPI 档位读设、轮询率读设、传感器采样率读设）与**猛玛 LARK A2**（声道/降噪/音量/灯/模板/监听等整套设置）。启动时实测只导入 8 个本地模块（`atk_core`、`hid_win`、`lark_a2_battery`、`lark_a2_control`、`lark_settings`、`ui_lark_pages`、`ui_switch_pixels`、`ui_theme`），`--selftest` 会打印这份清单并断言没有多出别的本地模块。右上角有「启动托盘 / 退出托盘」按钮：窗口起来后只轻量加载 `tray_common`（带 `win_link`/`win_shell`，不拉设备协议模块），托盘进程点击才启动；它与主程序用的是同一个托盘单例，启动时也会按原设置拉起桌面挂件。
+
+打成 exe 后，托盘、桌面挂件、低电量通知都会用**同一个 exe 加子角色参数**拉起，入口里必须逐个接住，否则每个子角色都会开出一个新的主窗口：
+
+| 参数 | 谁拉起 | 精简版行为 |
+| --- | --- | --- |
+| `--tray` | 主窗口的托盘按钮 / 开机自启 | 进托盘进程（只剥掉 `--tray` 自身，其余参数原样给托盘） |
+| `--widget` | 托盘启动时按配置 | 进桌面挂件（与主程序同一个单实例锁） |
+| `--toast` | 低电量提醒 | 弹出通知横幅，不建主窗口（参数定义与 `win_toast.main` 共用一份） |
+| `--ui` | 托盘菜单「打开界面」/ 双击 | 打开精简窗口；已有窗口就还原/置前，不开第二个 |
+| `--selftest [报告路径]` | 构建脚本 | 写 JSON 自检报告：实测本地模块、真实建一次窗口、内置字体、子角色可导入性、两台设备枚举 |
+
+托盘与精简窗口的标题不同，所以 `tray_common.UI_TITLES` 同时登记「我的设备电量」和「外设精简版 · ATK X1 / LARK A2」两个候选：托盘菜单「打开界面」能直接激活已有的精简窗口（不必每次重新解包 onefile），退出托盘时会连精简窗口一起关，挂件与通知横幅的「查看设备」同理。
+
+### 精简版的打包口径
+
+`app/build_lite_exe.py` 产出 `release/外设精简版-v1.0.2.exe`（单文件，约 15.6 MB）。「精简」指的是**启动时不去 import 别的品牌模块**，不是包内没有它们——托盘和桌面挂件跟主窗口共用这一个 exe，它们本身依赖 `battery.py` 等模块，所以那些模块在包里。`release/lite-manifest.json` 用 `local_modules`（启动实测）和 `bundled_heavy_modules`（包内实有）两个字段分别记录，不混为一谈。
+
+构建脚本的五道关：Tcl/Tk 真进包、压缩包里有图标与字体、跑一次 exe `--selftest`（导入面 + 真实窗口 + 字体 + 子角色）、把 SHA256/体积/重模块清单写进 manifest、开始前先删旧产物并回收 staging 目录（构建失败不会留下一对看起来正常的旧 exe）。
 
 ## 构建与验证
 
@@ -79,10 +97,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
 .\.venv\Scripts\python.exe scripts/run_tests.py
 .\.venv\Scripts\python.exe app/build_ui_exe.py
+.\.venv\Scripts\python.exe app/build_lite_exe.py
 .\.venv\Scripts\python.exe tools/peripheral_diagnostic/build_diagnostic.py
 ```
 
-输出位于 `release/`。两项构建脚本只构建，不部署或更改自启动。重建可能产生不同的 EXE 哈希；发布文件以附带的 SHA256 校验值为准。
+输出位于 `release/`。三个构建脚本只构建，不部署或更改自启动。重建可能产生不同的 EXE 哈希；发布文件以附带的 SHA256 校验值为准。
 
 ## 项目结构
 

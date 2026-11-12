@@ -398,8 +398,7 @@ def run_widget() -> int:
     def open_main_panel():
         hwnd = tc.ui_hwnd()
         if hwnd:
-            USER32.ShowWindow(hwnd, 9)
-            USER32.SetForegroundWindow(hwnd)
+            tc.focus_window(hwnd)
             return
         import subprocess
         try:

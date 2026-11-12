@@ -52,8 +52,11 @@ APP_NAME = "DeviceBatteryTray"
 WND_CLASS = "DeviceBatteryTrayWnd"
 MUTEX_NAME = "Global\\DeviceBatteryTray_single_instance"
 
-# 界面标题（托盘用它来找到已打开的窗口）
+# 界面标题（托盘用它来找到已打开的窗口）。精简版是一个独立窗口，标题不同，
+# 所以这里维护一个候选列表：托盘「打开界面」/「退出」才能作用到精简版窗口。
 UI_TITLE = "我的设备电量"
+LITE_UI_TITLE = "外设精简版 · ATK X1 / LARK A2"
+UI_TITLES = (UI_TITLE, LITE_UI_TITLE)
 WIDGET_TITLE = "DeviceBatteryDesktopWidget"
 
 DEFAULT_CONFIG = {
@@ -96,6 +99,10 @@ KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 USER32.FindWindowW.restype = ctypes.c_void_p
 USER32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+USER32.IsIconic.argtypes = [ctypes.c_void_p]
+USER32.IsIconic.restype = wintypes.BOOL
+USER32.BringWindowToTop.argtypes = [ctypes.c_void_p]
+USER32.BringWindowToTop.restype = wintypes.BOOL
 USER32.PostMessageW.restype = wintypes.BOOL
 USER32.PostMessageW.argtypes = [ctypes.c_void_p, wintypes.UINT,
                                 ctypes.c_size_t, ctypes.c_ssize_t]
@@ -495,9 +502,40 @@ def post_to_tray(msg_name: str) -> bool:
     return bool(USER32.PostMessageW(hwnd, msg, 0, 0))
 
 
-def ui_hwnd() -> int:
-    h = USER32.FindWindowW(None, UI_TITLE)
+def _find_window(title: str) -> int:
+    h = USER32.FindWindowW(None, title)
     return int(h) if h else 0
+
+
+def full_ui_hwnd() -> int:
+    """Only the full edition's window (the launcher owns that one)."""
+    return _find_window(UI_TITLE)
+
+
+def ui_hwnd() -> int:
+    """The open tool window: the full UI first, then the lean two-device one."""
+    for title in UI_TITLES:
+        hwnd = _find_window(title)
+        if hwnd:
+            return hwnd
+    return 0
+
+
+def focus_window(hwnd: int) -> bool:
+    """Bring an existing window forward without undoing a maximized state.
+
+    SW_RESTORE on a maximized window shrinks it, so only minimized windows are
+    restored; SetForegroundWindow can be refused by the foreground lock, in
+    which case the window is at least raised.
+    """
+    if not hwnd:
+        return False
+    handle = ctypes.c_void_p(hwnd)
+    if USER32.IsIconic(handle):
+        USER32.ShowWindow(handle, 9)      # SW_RESTORE
+    if not USER32.SetForegroundWindow(handle):
+        USER32.BringWindowToTop(handle)
+    return True
 
 
 def widget_hwnd() -> int:

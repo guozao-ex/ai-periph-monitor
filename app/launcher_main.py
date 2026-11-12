@@ -105,10 +105,10 @@ def main() -> int:
             pass
 
     # 2. 若工具界面已经打开则激活到前台，否则直接打开工具界面
-    hwnd = tc.ui_hwnd()
+    # 全量版只认自己的窗口：精简版是另一个标题，不能被它顶替。
+    hwnd = tc.full_ui_hwnd()
     if hwnd:
-        tc.USER32.ShowWindow(hwnd, 9)
-        tc.USER32.SetForegroundWindow(hwnd)
+        tc.focus_window(hwnd)
         return 0
 
     my_devices.main()

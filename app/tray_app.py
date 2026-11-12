@@ -67,7 +67,7 @@ NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 0x01, 0x02, 0x04, 0x10
 NIIF_INFO, NIIF_WARNING, NIIF_ERROR = 0x01, 0x02, 0x03
 
-SW_RESTORE = 9
+SW_RESTORE = 9      # kept for the icons; window focus goes through tc.focus_window
 
 # --------------------------------------------------------------------------
 # Win32 结构体与原型
@@ -469,8 +469,7 @@ class TrayApp:
         if hwnd:
             if home:
                 tc.request_ui_home(hwnd)
-            USER32.ShowWindow(hwnd, SW_RESTORE)
-            USER32.SetForegroundWindow(hwnd)
+            tc.focus_window(hwnd)
             self.log("工具界面已在前台")
             return
         import subprocess

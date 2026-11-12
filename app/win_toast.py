@@ -150,8 +150,7 @@ def _run_toast_window(title: str, message: str, warning: bool = True,
             import tray_common as tc
             hwnd = tc.ui_hwnd()
             if hwnd:
-                tc.USER32.ShowWindow(hwnd, 9)
-                tc.USER32.SetForegroundWindow(hwnd)
+                tc.focus_window(hwnd)
             else:
                 subprocess.Popen(
                     tc.build_subcommand("--ui", "my_devices.py"),
@@ -212,12 +211,17 @@ def _run_toast_window(title: str, message: str, warning: bool = True,
     return 0
 
 
-if __name__ == "__main__":
+def main(argv=None) -> int:
+    """Parse the toast options and show the banner; shared by every entry point."""
     import argparse
-    p = argparse.ArgumentParser(description="Windows 右下角置顶通知横幅")
-    p.add_argument("--title", default="外设低电量预警")
-    p.add_argument("--message", default="外设电量偏低，请及时充电。")
-    p.add_argument("--warning", action="store_true")
-    p.add_argument("--duration", type=float, default=7.0)
-    args = p.parse_args()
-    sys.exit(_run_toast_window(args.title, args.message, args.warning, args.duration))
+    parser = argparse.ArgumentParser(description="Windows 右下角置顶通知横幅")
+    parser.add_argument("--title", default="外设低电量预警")
+    parser.add_argument("--message", default="外设电量偏低，请及时充电。")
+    parser.add_argument("--warning", action="store_true")
+    parser.add_argument("--duration", type=float, default=7.0)
+    args = parser.parse_args(argv)
+    return int(_run_toast_window(args.title, args.message, args.warning, args.duration) or 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

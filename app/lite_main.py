@@ -5,9 +5,13 @@
     python app/lite_main.py
 
 导入面刻意收窄：hid_win + atk_core + lark_a2_* + lark_settings + ui_lark_pages
-+ ui_theme，不碰 battery.py / mouse_settings.py / ui_mouse_pages.py，
-所以打包时其余品牌模块不会被带进来。
++ ui_theme（连带 ui_switch_pixels），启动时不碰 battery.py /
+mouse_settings.py / ui_mouse_pages.py。注意：打包后托盘与桌面挂件跟主窗口共用
+同一个 exe，它们需要 battery.py 等模块，所以那些模块**在包里**——精简指的是
+启动时不去 import 它们，`--selftest` 报告里的 local_modules 就是实测口径。
 """
+import json
+import os
 import queue
 import sys
 import threading
@@ -15,10 +19,33 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
+# --windowed 打包后没有控制台：sys.stdout / sys.stderr 为 None，任何 print 或
+# traceback 输出都会直接抛错，这里统一绑到 devnull。
+for _stream in ('stdout', 'stderr'):
+    if getattr(sys, _stream, '') is None:
+        try:
+            setattr(sys, _stream, open(os.devnull, 'w', encoding='utf-8', errors='ignore'))
+        except OSError:
+            pass
+
 import ui_theme as ui
 import atk_core
 import hid_win as hw
 from ui_lark_pages import LarkSettingsPage
+
+# 精简入口启动时应当出现的本地模块（ui_switch_pixels 由 ui_theme 带入）。
+# selftest 不拿它当「已加载清单」，而是当「期望集合」：实际的本地模块靠
+# __file__ 落在 app 目录里动态识别，多出任何一个都算失败。入口自身在源码里叫
+# lite_main、在 exe 里叫 __main__，两个名字都不参与比对。
+LEAN_MODULES = ('atk_core', 'hid_win', 'lark_a2_battery', 'lark_a2_control',
+                'lark_settings', 'ui_lark_pages', 'ui_switch_pixels', 'ui_theme')
+SELF_NAMES = ('__main__', 'lite_main')
+HEAVY_MODULES = ('battery', 'mouse_settings', 'ui_mouse_pages', 'receiver_battery',
+                 'shared_readings', 'desktop_widget', 'installer', 'my_devices')
+# 子角色路由标记：打包后 tray_common 会用同一个 exe 加这些参数拉起子进程。
+# verify_lite_entry 会扫仓库里所有 build_subcommand 调用点，保证没漏。
+ROUTE_FLAGS = ('--tray', '--widget', '--ui', '--toast')
+WINDOW_TITLE = '外设精简版 · ATK X1 / LARK A2'
 
 
 class AtkPanel(ttk.Frame):
@@ -279,9 +306,9 @@ class AtkPanel(ttk.Frame):
 
 
 class LiteApp(tk.Tk):
-    def __init__(self):
+    def __init__(self, read_devices=True):
         super().__init__()
-        self.title('外设精简版 · ATK X1 / LARK A2')
+        self.title(WINDOW_TITLE)
         self.configure(bg=ui.BG)
         ui.select_theme('light')
         ui.configure(self)
@@ -307,7 +334,8 @@ class LiteApp(tk.Tk):
         self.lark = LarkSettingsPage(book)
         book.add(self.lark, text='麦克风 LARK A2')
         book.bind('<<NotebookTabChanged>>', self._tab_changed)
-        self.atk.refresh()
+        if read_devices:
+            self.atk.refresh()
 
     # ------------------------------------------------------------- tray
     @staticmethod
@@ -401,12 +429,161 @@ class LiteApp(tk.Tk):
         super().destroy()
 
 
+def _local_modules():
+    """Local modules already imported: everything whose file sits in this dir.
+
+    A whitelist alone would only catch a shrinking import surface; this catches
+    any new brand module pulled in at import time as well.
+    """
+    appdir = os.path.dirname(os.path.abspath(__file__))
+    stdlib = set(sys.stdlib_module_names)
+    names = []
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, '__file__', None)
+        if not path or os.path.dirname(os.path.abspath(path)) != appdir:
+            continue
+        # In a frozen build the standard library is unpacked into the same
+        # directory as the app modules, so the location alone cannot tell them
+        # apart - the stdlib name set can.
+        if name.split('.')[0] in stdlib:
+            continue
+        names.append(name)
+    return sorted(names)
+
+
+def selftest(report_path=None):
+    """打包后的冒烟自检：导入面、窗口能否搭起、内置字体、子角色、设备枚举。
+
+    返回 0 表示精简目标和资源都成立；设备读不到不算失败（无线设备会休眠）。
+    """
+    local = _local_modules()
+    report = {
+        'frozen': bool(getattr(sys, 'frozen', False)),
+        'executable': sys.executable,
+        'python': sys.version.split()[0],
+        'tk': tk.TkVersion,
+        'local_modules': local,
+        'unexpected_modules': sorted(set(local) - set(LEAN_MODULES) - set(SELF_NAMES)),
+        'missing_modules': sorted(set(LEAN_MODULES) - set(local)),
+        'heavy_modules': sorted(m for m in HEAVY_MODULES if m in sys.modules),
+    }
+    # Build the real window once (without touching the device): this is what
+    # catches a heavy import added to LiteApp.__init__ later on.
+    try:
+        window = LiteApp(read_devices=False)
+        window.update_idletasks()
+        report['window_built'] = True
+        report['window_title'] = window.title()
+        window.destroy()
+    except Exception as exc:      # noqa: BLE001 - reported as text
+        report['window_built'] = False
+        report['window_error'] = str(exc)
+    report['heavy_modules_after_window'] = sorted(m for m in HEAVY_MODULES if m in sys.modules)
+    try:
+        import tray_font
+        report['tray_font'] = bool(any(tray_font.digit_mask('100', 16)))
+    except Exception as exc:      # noqa: BLE001 - reported as text
+        report['tray_font'] = False
+        report['tray_font_error'] = str(exc)
+    try:
+        iface = atk_core.config_interface()
+        report['atk_interface'] = None if iface is None else iface.path
+    except Exception as exc:      # noqa: BLE001
+        report['atk_error'] = str(exc)
+    try:
+        import lark_settings
+        iface = lark_settings.find_interface()
+        report['lark_interface'] = None if iface is None else iface.path
+    except Exception as exc:      # noqa: BLE001
+        report['lark_error'] = str(exc)
+    roles = {}
+    for name in ('tray_app', 'desktop_widget', 'win_toast'):
+        try:
+            __import__(name)      # proves the child roles are bundled
+            roles[name] = True
+        except Exception as exc:      # noqa: BLE001
+            roles[name] = str(exc)
+    report['child_roles'] = roles
+    report['ok'] = bool(
+        not report['heavy_modules']
+        and not report['heavy_modules_after_window']
+        and not report['unexpected_modules']
+        and report['window_built']
+        and report.get('window_title') == WINDOW_TITLE
+        and report['tray_font']
+        and all(v is True for v in roles.values()))
+    text = json.dumps(report, ensure_ascii=False, indent=1)
+    if report_path:
+        try:
+            with open(report_path, 'w', encoding='utf-8') as fh:
+                fh.write(text + '\n')
+        except OSError as exc:
+            print('selftest report not written: %s' % exc)
+            return 2
+    print(text)
+    return 0 if report['ok'] else 1
+
+
+def child_argv(argv, flag):
+    """Drop one routing flag; every other argument belongs to the child role."""
+    out = list(argv)
+    try:
+        out.remove(flag)
+    except ValueError:
+        pass
+    return out
+
+
+def activate_existing(title):
+    """Bring the window with this exact title forward; True when one exists."""
+    try:
+        import ctypes
+        user32 = ctypes.WinDLL('user32', use_last_error=True)
+        user32.FindWindowW.restype = ctypes.c_void_p
+        user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+        hwnd = user32.FindWindowW(None, title)
+        if not hwnd:
+            return False
+        handle = ctypes.c_void_p(hwnd)
+        # SW_RESTORE only when minimized: on a maximized window it would undo
+        # the maximized state and shrink the window the user left there.
+        if user32.IsIconic(handle):
+            user32.ShowWindow(handle, 9)
+        if not user32.SetForegroundWindow(handle):
+            user32.BringWindowToTop(handle)     # foreground lock fallback
+        return True
+    except Exception:      # noqa: BLE001 - never trade a window for an icon
+        return False
+
+
 def main():
-    # Frozen builds route the tray to this same executable (tray_common builds
-    # [sys.executable, "--tray"]), so that argument must not open a second UI.
-    if '--tray' in sys.argv:
+    # Frozen builds route every child role to this same executable (tray_common
+    # builds [sys.executable, "--tray"] / "--widget" / "--ui" / "--toast"), so
+    # each of those must be dispatched here instead of opening a second window.
+    args = sys.argv[1:]
+    if '--selftest' in args:
+        rest = args[args.index('--selftest') + 1:]
+        # --selftest 后面只接受一个不以 - 开头的路径；其余一律当标志位忽略。
+        report_path = rest[0] if rest and not rest[0].startswith('-') else None
+        return selftest(report_path)
+    if '--tray' in args:
         import tray_app
+        # tray_app's parser only knows --debug/--status/--quit; leaving --tray in
+        # argv makes argparse exit with "unrecognized arguments" instead of
+        # starting the tray.
+        sys.argv = child_argv(sys.argv, '--tray')
         return tray_app.main()
+    if '--widget' in args:
+        import desktop_widget
+        sys.argv = child_argv(sys.argv, '--widget')
+        return int(desktop_widget.run_widget() or 0)
+    if '--toast' in args:
+        import win_toast
+        return win_toast.main(child_argv(sys.argv, '--toast')[1:])
+    # --ui (tray menu "open interface") and a plain double click both mean: show
+    # the lean window, one instance only.
+    if activate_existing(WINDOW_TITLE):
+        return 0
     app = LiteApp()
     app.geometry('960x680')
     app.mainloop()
@@ -414,4 +591,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

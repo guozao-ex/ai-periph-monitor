@@ -1,5 +1,20 @@
 # 更新日志
 
+## fork 本地适配 — 2026-11-12（精简版打包）
+
+- 新增 `app/build_lite_exe.py`：把 `app/lite_main.py` 打成单文件 `release/外设精简版-v1.0.2.exe`（PyInstaller onefile + windowed，15.6 MB）。只带 `app_icon.ico/png`、`THIRD_PARTY_NOTICES.txt` 和托盘数字字体 `fonts/ZCOOLQingKeHuangYou-Regular.ttf`；`brand_assets/`（1.8 MB）与其它字体不随精简版发布。
+- 构建脚本自带五道关：Tcl/Tk 必须真进包（否则报错不产出）、压缩包内必须有图标与字体、跑一次 exe `--selftest` 确认启动导入面仍是那 8 个本地模块、把 SHA256/体积/打包进包的重模块清单写进 `release/lite-manifest.json`、开始前先删掉旧产物（失败时不会留下一对「自洽但过期」的 exe+manifest），staging 目录在 `finally` 里回收。
+- 新增 `--selftest [报告路径]`：输出 JSON——是否 frozen、Python/Tk 版本、**实测的本地模块集合**（按 `__file__` 落在 app 目录 + 排除标准库判定，不是手写白名单）、多出/缺失的模块、重模块、真实搭一次窗口后的重模块复查、内置托盘字体能否出字形、三个子角色能否 import、ATK/LARK 接口枚举结果。源码与 exe 都能跑，设备读不到只记录不失败。`main()` 现在 `sys.exit(main())`，自检失败会真的返回非 0。
+- **修掉三个只在 exe 里才暴露的路由缺陷**（源码直跑都看不出来）：
+  - `--tray` 原来把参数原样丢给 `tray_app`，而它的 argparse 只认 `--debug/--status/--quit`，于是 `exe --tray` 直接以 `unrecognized arguments` 退出——点「启动托盘」永远起不来。现在只剥掉 `--tray` 这一个路由参数，其余原样传给托盘（不会误删 `--message "--ui"` 这类值）。
+  - `--widget` 原来没有分支，托盘按配置拉起桌面挂件时会**开出一个新的精简主窗口**；而 `is_widget_running()` 找不到挂件窗口，于是每次同步都可能再开一个。现在路由到 `desktop_widget.run_widget()`。
+  - `--toast` 同理：低电量提醒会开出主窗口。现在路由到 `win_toast.main()`——顺手把 `win_toast` 的 argparse 收进 `main(argv)`，两个入口共用一份定义，不再各写一份、也不再靠 `parse_known_args` 静默吞参数。
+- 窗口激活统一走 `tray_common.focus_window()`：只在窗口最小化时才 `SW_RESTORE`（原来无条件调用，会把用户最大化的窗口缩回去），`SetForegroundWindow` 被前台锁拒绝时降级 `BringWindowToTop`，整段有 try/except。
+- 托盘与精简窗口的标题不一致导致的三个连带问题：`tray_common` 新增 `UI_TITLES` 候选（全量「我的设备电量」+ 精简「外设精简版 · ATK X1 / LARK A2」），`ui_hwnd()` 依次尝试，于是托盘「打开界面」能直接激活已有精简窗口而不用每次 spawn 一个 onefile（1.2 s 解包）、退出托盘时会连精简主窗口一起关、挂件与通知横幅的「查看设备」同理；`launcher_main` 改用新增的 `full_ui_hwnd()`，全量版不会被精简窗口顶替。
+- 精简口径写清：`--selftest` 的 `local_modules` 是**启动时实测**的 8 个本地模块（`atk_core / hid_win / lark_a2_battery / lark_a2_control / lark_settings / ui_lark_pages / ui_switch_pixels / ui_theme`，`ui_switch_pixels` 由 `ui_theme` 带入，之前的白名单漏了它）。包内仍含 `battery / mouse_settings / receiver_battery / shared_readings / desktop_widget`——托盘和桌面挂件跟主窗口共用同一个 exe，它们需要这些模块；manifest 里以 `bundled_heavy_modules` 如实记录，不再声称「不会带进包」。
+- 新增 `app/verify_lite_entry.py`（14 条）：路由参数只剥自己的、`--message "--ui"` 这类值不被误删、`--tray --status` 子进程不再报 argparse 错、**扫所有 `build_subcommand` 调用点断言每个 flag 都被 `ROUTE_FLAGS` 接住**（将来加第五个子角色会立刻红）、`--selftest` 报告字段与实测导入面、真实窗口标题、子角色可导入性、内置字体出字形、`--selftest --ui` 不把标志当路径、托盘能同时找到两个版本的窗口而全量版只认自己的。全量 **527 + 37 + 22 全绿**。
+- 实机验收（2026-11-12，exe）：`--selftest` → `ok: true`、`unexpected_modules: []`、`heavy_modules: []`、`window_built: true`；`--tray` → 托盘起来且它拉起的 `--widget` 正常出挂件、**不再冒出第二个主窗口**，`ui_hwnd()` 从 0 变有值；退出托盘 → 托盘与挂件一起退；`--toast` 弹横幅不建窗口；两次 `--ui` 只留一个窗口、最大化状态不被缩回；窗口内读回 ATK X1 大师版 90%、DPI 1600。
+
 ## fork 本地适配 — 2026-11-10（精简入口 + ATK 8K 协议核心）
 
 - 新增 `app/atk_core.py`：把 ATK 8K 接收器 0xFF02 通道的协议做成自包含模块——身份、电量、DPI 档位读设、回报率读设，帧校验（每 17 字节合计 0x55）与写后读回都在里面。
