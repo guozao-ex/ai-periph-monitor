@@ -307,6 +307,10 @@ class AtkPanel(ttk.Frame):
 
 class LiteApp(tk.Tk):
     def __init__(self, read_devices=True):
+        # Must happen before Tk() creates the window: without it Windows treats the
+        # process as DPI-unaware and bitmap-stretches the whole window on a scaled
+        # display, which is what makes the text look soft next to the full edition.
+        ui.prepare_process()
         super().__init__()
         self.title(WINDOW_TITLE)
         self.configure(bg=ui.BG)
@@ -451,6 +455,17 @@ def _local_modules():
     return sorted(names)
 
 
+def _dpi_awareness():
+    """0 unaware, 1 system, 2 per-monitor; 0 is what blurs the window."""
+    try:
+        import ctypes
+        value = ctypes.c_int()
+        ctypes.WinDLL('shcore').GetProcessDpiAwareness(None, ctypes.byref(value))
+        return value.value
+    except Exception:      # noqa: BLE001 - Windows before 8.1
+        return -1
+
+
 def selftest(report_path=None):
     """打包后的冒烟自检：导入面、窗口能否搭起、内置字体、子角色、设备枚举。
 
@@ -474,6 +489,11 @@ def selftest(report_path=None):
         window.update_idletasks()
         report['window_built'] = True
         report['window_title'] = window.title()
+        # A DPI-unaware process gets its whole window bitmap-stretched on a
+        # scaled display, which is exactly what makes the text look soft.
+        report['dpi_awareness'] = _dpi_awareness()
+        report['tk_scaling'] = float(window.tk.call('tk', 'scaling'))
+        report['window_px'] = [window.winfo_width(), window.winfo_height()]
         window.destroy()
     except Exception as exc:      # noqa: BLE001 - reported as text
         report['window_built'] = False
@@ -510,6 +530,7 @@ def selftest(report_path=None):
         and not report['unexpected_modules']
         and report['window_built']
         and report.get('window_title') == WINDOW_TITLE
+        and report.get('dpi_awareness') != 0      # 0 = unaware -> stretched text
         and report['tray_font']
         and all(v is True for v in roles.values()))
     text = json.dumps(report, ensure_ascii=False, indent=1)
@@ -585,7 +606,10 @@ def main():
     if activate_existing(WINDOW_TITLE):
         return 0
     app = LiteApp()
-    app.geometry('960x680')
+    factor = ui.scale(app)
+    width = min(round(960 * factor), app.winfo_screenwidth() - 80)
+    height = min(round(680 * factor), app.winfo_screenheight() - 100)
+    app.geometry('%dx%d' % (width, height))
     app.mainloop()
     return 0
 

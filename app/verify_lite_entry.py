@@ -94,7 +94,8 @@ class SelftestReportTest(unittest.TestCase):
         self.assertEqual(self.done.returncode, 0, self.done.stderr)
         for key in ('frozen', 'python', 'tk', 'local_modules', 'unexpected_modules',
                     'missing_modules', 'heavy_modules', 'heavy_modules_after_window',
-                    'window_built', 'window_title', 'tray_font', 'child_roles', 'ok'):
+                    'window_built', 'window_title', 'dpi_awareness', 'tk_scaling',
+                    'tray_font', 'child_roles', 'ok'):
             self.assertIn(key, self.report)
         self.assertTrue(self.report['ok'], self.report)
 
@@ -107,6 +108,11 @@ class SelftestReportTest(unittest.TestCase):
     def test_window_builds_with_the_shared_title(self):
         self.assertTrue(self.report['window_built'], self.report.get('window_error'))
         self.assertEqual(self.report['window_title'], lite_main.WINDOW_TITLE)
+
+    def test_process_is_dpi_aware(self):
+        """0 = unaware: Windows bitmap-stretches the window on a scaled display."""
+        self.assertNotEqual(self.report['dpi_awareness'], 0)
+        self.assertGreaterEqual(self.report['tk_scaling'], 1.0)
 
     def test_child_roles_importable(self):
         self.assertEqual(self.report['child_roles'],

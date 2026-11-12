@@ -1,5 +1,12 @@
 # 更新日志
 
+## fork 本地适配 — 2026-11-12（精简窗口 DPI 修正）
+
+- 修掉「面板字体发虚」：`LiteApp` 现在在 `tk.Tk()` 之前调用 `ui.prepare_process()`（`SetProcessDPIAware`）。之前这个进程是 **DPI 不感知** 的，本机 2560×1440 / 150% 缩放下 Windows 把整个 960×680 窗口位图拉伸 1.5 倍，字就糊了；全量版 `my_devices` / 挂件 / 通知都调了它，只有精简窗口漏了。
+- 实测对照（同一台机器、同一次启动）：不感知时 `GetProcessDpiAwareness=0`、窗口物理 1464×1079 全是插值；修正后 `=1`、Tk 按 144 DPI 原生渲染（`tk scaling 2.0`），文字边缘台阶强度 p90 从 149 升到 168、强边缘均值 76.6 → 99.5（更锐）。
+- 窗口尺寸跟着缩放：`main()` 用 `ui.scale(app)` 算 960×680 的 DPI 等效尺寸（本机 1440×1020），不再固定写死。
+- `--selftest` 增加 `dpi_awareness` / `tk_scaling` / `window_px`，`ok` 要求 `dpi_awareness != 0`，防止以后又退回不感知；`verify_lite_entry.py` 加一条对应断言（15 条）。全量 **528 + 37 + 22 全绿**。
+
 ## fork 本地适配 — 2026-11-12（精简版打包）
 
 - 新增 `app/build_lite_exe.py`：把 `app/lite_main.py` 打成单文件 `release/外设精简版-v1.0.2.exe`（PyInstaller onefile + windowed，15.6 MB）。只带 `app_icon.ico/png`、`THIRD_PARTY_NOTICES.txt` 和托盘数字字体 `fonts/ZCOOLQingKeHuangYou-Regular.ttf`；`brand_assets/`（1.8 MB）与其它字体不随精简版发布。
